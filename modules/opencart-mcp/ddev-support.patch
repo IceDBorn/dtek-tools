@@ -1,0 +1,203 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 5e44fe8..98dff04 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [build-system]
+ requires = ["setuptools>=68.0"]
+-build-backend = "setuptools.backends._legacy:_Backend"
++build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "opencart-mcp"
+@@ -16,7 +16,6 @@ keywords = ["opencart", "mcp", "model-context-protocol", "ecommerce", "journal3"
+ classifiers = [
+     "Development Status :: 4 - Beta",
+     "Intended Audience :: Developers",
+-    "License :: OSI Approved :: MIT License",
+     "Programming Language :: Python :: 3",
+     "Programming Language :: Python :: 3.10",
+     "Programming Language :: Python :: 3.11",
+diff --git a/src/opencart_mcp/config.py b/src/opencart_mcp/config.py
+index a14564d..8a30984 100644
+--- a/src/opencart_mcp/config.py
++++ b/src/opencart_mcp/config.py
+@@ -12,18 +12,34 @@ class Config:
+     db_user: str
+     db_pass: str
+     db_name: str
+-    oc_root: str  # OpenCart root directory on VPS
+-    storage_dir: str  # Storage directory on VPS
++    oc_root: str  # OpenCart root directory (container path for DDEV)
++    storage_dir: str  # Storage directory (container path for DDEV)
++    local_root: str  # Local project path (cwd for ddev commands)
++
++    @property
++    def is_ddev(self) -> bool:
++        return self.ssh_host.lower() == "ddev"
+ 
+     @classmethod
+     def from_env(cls) -> "Config":
++        ssh_host = os.environ.get("OPENCART_SSH_HOST", "")
++        local_root = os.environ.get("OPENCART_ROOT", "")
++
++        if ssh_host.lower() == "ddev":
++            oc_root = "/var/www/html"
++            storage_dir = f"{oc_root}/system/storage"
++        else:
++            oc_root = local_root or os.environ.get("OPENCART_ROOT", "")
++            storage_dir = os.environ.get("OPENCART_STORAGE", f"{oc_root}/system/storage")
++
+         return cls(
+-            ssh_host=os.environ.get("OPENCART_SSH_HOST", ""),
++            ssh_host=ssh_host,
+             ssh_user=os.environ.get("OPENCART_SSH_USER", ""),
+             ssh_key=os.environ.get("OPENCART_SSH_KEY", os.path.expanduser("~/.ssh/id_ed25519")),
+             db_user=os.environ.get("OPENCART_DB_USER", ""),
+             db_pass=os.environ.get("OPENCART_DB_PASS", ""),
+             db_name=os.environ.get("OPENCART_DB_NAME", ""),
+-            oc_root=os.environ.get("OPENCART_ROOT", ""),
+-            storage_dir=os.environ.get("OPENCART_STORAGE", ""),
++            oc_root=oc_root,
++            storage_dir=storage_dir,
++            local_root=local_root,
+         )
+diff --git a/src/opencart_mcp/db.py b/src/opencart_mcp/db.py
+index 0d5c732..bb11f02 100644
+--- a/src/opencart_mcp/db.py
++++ b/src/opencart_mcp/db.py
+@@ -1,6 +1,8 @@
+-"""SSH + PHP query executor for OpenCart MySQL."""
++"""SSH + PHP query executor for OpenCart MySQL, with DDEV support."""
+ 
+ import json
++import subprocess
++
+ import paramiko
+ 
+ from .config import Config
+@@ -10,11 +12,34 @@ _NOISE = ("tput:", "WARNING:", "post-quantum", "upgraded", "Unsuccessful stat")
+ 
+ 
+ class OpenCartDB:
+-    """Executes MySQL queries on VPS via SSH + PHP scripts."""
++    """Executes MySQL queries on VPS via SSH + PHP scripts, or via DDEV."""
+ 
+     def __init__(self, config: Config):
+         self.config = config
+         self._client: paramiko.SSHClient | None = None
++        self._use_ddev = config.is_ddev
++
++    # ── DDEV backend ──────────────────────────────────────────────
++
++    def _ddev_exec(self, command: str, timeout: int = 30) -> tuple[str, str]:
++        """Execute command inside DDEV web container."""
++        result = subprocess.run(
++            ["ddev", "exec", "bash", "-c", command],
++            capture_output=True, text=True, timeout=timeout,
++            cwd=self.config.local_root or None,
++        )
++        return result.stdout, result.stderr
++
++    def _ddev_exec_php_stdin(self, php_code: str, timeout: int = 30) -> str:
++        """Execute PHP code by piping to php inside DDEV."""
++        result = subprocess.run(
++            ["ddev", "exec", "php"],
++            input=php_code, capture_output=True, text=True, timeout=timeout,
++            cwd=self.config.local_root or None,
++        )
++        return result.stdout
++
++    # ── SSH backend ───────────────────────────────────────────────
+ 
+     def _get_client(self) -> paramiko.SSHClient:
+         """Get or create SSH connection."""
+@@ -22,7 +47,6 @@ class OpenCartDB:
+             transport = self._client.get_transport()
+             if transport is not None and transport.is_active():
+                 return self._client
+-            # Connection dead, reconnect
+             self._client = None
+ 
+         client = paramiko.SSHClient()
+@@ -36,7 +60,7 @@ class OpenCartDB:
+         self._client = client
+         return client
+ 
+-    def _exec(self, command: str, timeout: int = 30) -> tuple[str, str]:
++    def _ssh_exec(self, command: str, timeout: int = 30) -> tuple[str, str]:
+         """Execute command via SSH, return (stdout, stderr)."""
+         client = self._get_client()
+         _, stdout, stderr = client.exec_command(command, timeout=timeout)
+@@ -44,7 +68,7 @@ class OpenCartDB:
+         err = stderr.read().decode("utf-8", errors="replace")
+         return out, err
+ 
+-    def _exec_php_stdin(self, php_code: str, timeout: int = 30) -> str:
++    def _ssh_exec_php_stdin(self, php_code: str, timeout: int = 30) -> str:
+         """Execute PHP code by piping to php via stdin. Returns raw stdout."""
+         client = self._get_client()
+         stdin, stdout, stderr = client.exec_command("php", timeout=timeout)
+@@ -53,13 +77,27 @@ class OpenCartDB:
+         out = stdout.read().decode("utf-8", errors="replace")
+         return out
+ 
++    # ── Dispatch ──────────────────────────────────────────────────
++
++    def _exec(self, command: str, timeout: int = 30) -> tuple[str, str]:
++        if self._use_ddev:
++            return self._ddev_exec(command, timeout)
++        return self._ssh_exec(command, timeout)
++
++    def _exec_php_stdin(self, php_code: str, timeout: int = 30) -> str:
++        if self._use_ddev:
++            return self._ddev_exec_php_stdin(php_code, timeout)
++        return self._ssh_exec_php_stdin(php_code, timeout)
++
++    # ── Public API ────────────────────────────────────────────────
++
+     def run_query(self, sql: str) -> list[dict] | dict:
+         """Execute SQL query and return results as list of dicts."""
+         escaped_sql = sql.replace("\\", "\\\\").replace("'", "\\'")
+ 
+         php = f"""<?php
+ error_reporting(0);
+-$db = new mysqli('localhost', '{self.config.db_user}', '{self.config.db_pass}', '{self.config.db_name}');
++$db = new mysqli('{"db" if self.config.is_ddev else "localhost"}', '{self.config.db_user}', '{self.config.db_pass}', '{self.config.db_name}');
+ if ($db->connect_error) {{
+     echo json_encode(["error" => "DB connect failed: " . $db->connect_error]);
+     exit;
+@@ -101,7 +139,7 @@ $db->close();
+         return self._exec_php_stdin(php_code)
+ 
+     def run_command(self, command: str, timeout: int = 30) -> str:
+-        """Execute shell command on VPS, return output."""
++        """Execute shell command, return output."""
+         out, err = self._exec(command, timeout=timeout)
+         if err.strip():
+             err_lines = [
+@@ -113,12 +151,18 @@ $db->close();
+         return out
+ 
+     def write_file(self, remote_path: str, content: str):
+-        """Write content to a file on VPS via SFTP."""
+-        client = self._get_client()
+-        sftp = client.open_sftp()
+-        with sftp.file(remote_path, "w") as f:
+-            f.write(content)
+-        sftp.close()
++        """Write content to a file on VPS via SFTP, or via ddev exec."""
++        if self._use_ddev:
++            import base64
++            b64 = base64.b64encode(content.encode()).decode()
++            php = f"""<?php file_put_contents('{remote_path}', base64_decode('{b64}')); echo 'ok';"""
++            self._exec_php_stdin(php)
++        else:
++            client = self._get_client()
++            sftp = client.open_sftp()
++            with sftp.file(remote_path, "w") as f:
++                f.write(content)
++            sftp.close()
+ 
+     def close(self):
+         """Close SSH connection."""
