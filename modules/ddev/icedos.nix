@@ -41,12 +41,14 @@
                       command = "start";
                     in
                     {
+                      inherit command;
+
                       bin = "${pkgs.writeShellScript command ''
                         ${ddev} poweroff
                         ${ddev} start
                         ${ddev} mailpit
                       ''}";
-                      command = command;
+
                       help = "start development server";
                     }
                   )
@@ -55,8 +57,8 @@
                       command = "stop";
                     in
                     {
+                      inherit command;
                       bin = "${pkgs.writeShellScript command ''${ddev} poweroff''}";
-                      command = command;
                       help = "stop development server";
                     }
                   )
@@ -65,8 +67,8 @@
                       command = "delete";
                     in
                     {
+                      inherit command;
                       bin = "${pkgs.writeShellScript command ''${ddev} delete --omit-snapshot''}";
-                      command = command;
                       help = "delete project from ddev";
                     }
                   )
@@ -75,6 +77,8 @@
                       command = "db";
                     in
                     {
+                      inherit command;
+
                       bin = "${pkgs.writeShellScript command ''
                         ${colorBashHeader}
 
@@ -100,7 +104,7 @@
                             ;;
                         esac
                       ''}";
-                      command = command;
+
                       help = "database related commands";
                     }
                   )
@@ -109,6 +113,8 @@
                 command = "ddev";
               in
               {
+                inherit command;
+
                 bin = "${pkgs.writeShellScript command ''
                   ${colorBashHeader}
 
@@ -136,7 +142,6 @@
                   esac
                 ''}";
 
-                command = command;
                 help = "print ddev related commands";
               }
             )
