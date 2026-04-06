@@ -6,7 +6,6 @@
     [
       (
         {
-          config,
           lib,
           pkgs,
           ...
@@ -21,8 +20,6 @@
           systemd.tmpfiles.rules = [
             "L+ /usr/local/lib/docker/cli-plugins/docker-buildx - - - - ${pkgs.docker-buildx}/libexec/docker/cli-plugins/docker-buildx"
           ];
-
-          virtualisation.docker.enable = true;
 
           icedos.applications.toolset.commands = [
             (
@@ -151,17 +148,16 @@
               }
             )
           ];
-
-          users.users =
-            let
-              inherit (lib) mapAttrs;
-            in
-            mapAttrs (user: _: {
-              extraGroups = [ "docker" ];
-            }) config.icedos.users;
         }
       )
     ];
 
-  meta.name = "ddev";
+  meta = {
+    name = "ddev";
+
+    dependencies = [{
+      url = "github:icedos/apps";
+      modules = ["docker"];
+    }];
+  };
 }
