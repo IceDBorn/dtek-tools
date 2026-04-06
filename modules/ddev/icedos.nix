@@ -15,6 +15,11 @@
         {
           environment.systemPackages = with pkgs; [
             ddev
+            docker-buildx
+          ];
+
+          systemd.tmpfiles.rules = [
+            "L+ /usr/local/lib/docker/cli-plugins/docker-buildx - - - - ${pkgs.docker-buildx}/libexec/docker/cli-plugins/docker-buildx"
           ];
 
           virtualisation.docker.enable = true;
@@ -32,8 +37,8 @@
                 '';
 
                 helpFlags = ''"$1" == "" || "$1" == "--help" || "$1" == "-h" || "$1" == "help" || "$1" == "h"'';
-                purpleString = string: ''''${PURPLE}${string}''${NC}'';
-                redString = string: ''''${RED}${string}''${NC}'';
+                purpleString = string: "\${PURPLE}${string}\${NC}";
+                redString = string: "\${RED}${string}\${NC}";
 
                 commands = [
                   (
@@ -58,7 +63,7 @@
                     in
                     {
                       inherit command;
-                      bin = "${pkgs.writeShellScript command ''${ddev} poweroff''}";
+                      bin = "${pkgs.writeShellScript command "${ddev} poweroff"}";
                       help = "stop development server";
                     }
                   )
@@ -68,7 +73,7 @@
                     in
                     {
                       inherit command;
-                      bin = "${pkgs.writeShellScript command ''${ddev} delete --omit-snapshot''}";
+                      bin = "${pkgs.writeShellScript command "${ddev} delete --omit-snapshot"}";
                       help = "delete project from ddev";
                     }
                   )
