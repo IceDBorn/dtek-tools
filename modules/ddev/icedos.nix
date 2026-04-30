@@ -58,6 +58,7 @@
                           command = "import";
                           help = "import database from file";
                           script = ''${ddevBin} import-db --file="$1"'';
+                          completion.files = true;
                         }
                         {
                           command = "info";
@@ -75,7 +76,7 @@
 
                   script = ''
                     if [ "$1" == "" ]; then
-                      echo "${icedosLib.redString "error:"} XML feed url missing"
+                      echo "${icedosLib.bash.redString "error:"} XML feed url missing"
                       exit 1
                     fi
 
