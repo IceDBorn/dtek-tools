@@ -20,7 +20,7 @@
             "L+ /usr/local/lib/docker/cli-plugins/docker-buildx - - - - ${pkgs.docker-buildx}/libexec/docker/cli-plugins/docker-buildx"
           ];
 
-          icedos.applications.toolset.commands = [
+          icedos.system.toolset.commands = [
             {
               command = "dtek";
               help = "print dtek related commands";
