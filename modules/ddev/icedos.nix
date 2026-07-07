@@ -5,20 +5,31 @@
     { ... }:
     [
       (
-        { pkgs, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
 
         let
           ddevBin = "${pkgs.ddev}/bin/ddev";
         in
         {
-          environment.systemPackages = with pkgs; [
-            ddev
-            docker-buildx
-          ];
+          environment.systemPackages = [ pkgs.ddev ];
 
-          systemd.tmpfiles.rules = [
-            "L+ /usr/local/lib/docker/cli-plugins/docker-buildx - - - - ${pkgs.docker-buildx}/libexec/docker/cli-plugins/docker-buildx"
-          ];
+          # ddev talks to podman through the Docker-compatible socket:
+          # dockerSocket exposes podman's socket where Docker tools look for
+          # docker.sock, and dockerCompat provides a `docker` alias. Invoking
+          # users must be in the `podman` group to reach the socket.
+          virtualisation.podman = {
+            dockerCompat = true;
+            dockerSocket.enable = true;
+          };
+
+          users.users = lib.mapAttrs (_: _: {
+            extraGroups = [ "podman" ];
+          }) config.icedos.users;
 
           icedos.system.toolset.commands = [
             {
@@ -117,8 +128,8 @@
 
     dependencies = [
       {
-        url = "github:icedos/apps";
-        modules = [ "docker" ];
+        url = "github:icedos/virtualisation";
+        modules = [ "podman" ];
       }
     ];
   };
